@@ -22,7 +22,8 @@ layout(location=1) in vec3 vNormal;   // vertex normal
 layout(location=2) in vec2 vTexCoord; // vertex texcoord
 
 uniform mat4 modelViewProjMatrix;
-uniform mat4 modelViewMatrix;
+uniform mat4 modelMatrix;
+uniform vec3 eyePos;
 
 uniform vec3 ambientFactor;
 uniform vec3 lightDir;
@@ -41,8 +42,8 @@ out VertexOutput {
 
 void main()
 {
-    vertOut.position = (modelViewMatrix * vec4(vPos,1.0)).xyz;
-    vertOut.normal = (modelViewMatrix * vec4(vNormal,0.0)).xyz;
+    vertOut.position = (modelMatrix * vec4(vPos,1.0)).xyz;
+    vertOut.normal = (mat3(transpose(inverse(modelMatrix))) * vNormal).xyz;
     vertOut.texCoord = vTexCoord;
     gl_Position = modelViewProjMatrix * vec4(vPos,1.0);
 }

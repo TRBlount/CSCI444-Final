@@ -34,6 +34,7 @@
 #include <CSCI441/ShaderUtils3.hpp>
 #include <CSCI441/ShaderProgram3.hpp>
 #include <CSCI441/modelLoader3.hpp>
+#include <CSCI441/objects3.hpp>
 
 #include <SOIL/SOIL.h>
 
@@ -164,8 +165,9 @@ struct ReflectShaderUniformLocations {
 CSCI441::ShaderProgram *modelShaderProgram = NULL;
 
 struct ModelShaderUniformLocations {
-    GLint mvMtx;
+    GLint mMtx;
     GLint mvpMtx;
+    GLint eyePos;
     GLint lightDir;
     GLint lightColor;
     GLint attenuation;
@@ -203,6 +205,8 @@ struct TextShaderAttributeLocations {
 
 bool mackHack = false;
 
+CSCI441::ModelLoader *cubeModel;
+
 //*************************************************************************************
 
 // Helper Funcs
@@ -230,7 +234,12 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 		shiftDown = true;
 	else if(key == GLFW_KEY_LEFT_SHIFT && action == GLFW_RELEASE)
 		shiftDown = false;
-
+    else if(key == GLFW_KEY_M && action == GLFW_RELEASE) {
+        if (activeMat == metal)
+            activeMat = rubber;
+        else
+            activeMat = metal;
+    }
 }
 
 // handle mouse clicks
@@ -370,7 +379,8 @@ void setupShaders() {
     
     modelShaderProgram = new CSCI441::ShaderProgram( "shaders/model.v.glsl", "shaders/model.f.glsl" );
 	
-	modelShaderUniformLocs.mvMtx          = modelShaderProgram->getUniformLocation( "modelViewMatrix" );
+    modelShaderUniformLocs.mMtx          = modelShaderProgram->getUniformLocation( "modelMatrix" );
+    modelShaderUniformLocs.eyePos         = modelShaderProgram->getUniformLocation( "eyePos" );
     modelShaderUniformLocs.mvpMtx         = modelShaderProgram->getUniformLocation( "modelViewProjMatrix" );
     modelShaderUniformLocs.lightDir       = modelShaderProgram->getUniformLocation( "lightDir" );
     modelShaderUniformLocs.lightColor     = modelShaderProgram->getUniformLocation( "lightColor" );
@@ -455,7 +465,7 @@ void setupBuffers() {
 	glVertexAttribPointer( shaderAttribLocs.position, 3, GL_FLOAT, GL_FALSE, 0, (void*) 0 );
 
 	//------------  END  SKYBOX VAO------------
-
+    cubeModel = new CSCI441::ModelLoader("objects/cube.obj");
 }
 
 void setupNormals() {
@@ -522,9 +532,13 @@ void setupTextures() {
     glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
     
     // Parse cube textures
-    activeMat = new TextureMaterial();
-    activeMat->diffMap = CSCI441::TextureUtils::loadAndRegisterTexture( "textures/metal-diff.png" );
-    activeMat->specMap = CSCI441::TextureUtils::loadAndRegisterTexture( "textures/metal-spec.png" );
+    metal = new TextureMaterial();
+    metal->diffMap = CSCI441::TextureUtils::loadAndRegisterTexture( "textures/metal-diff.png" );
+    metal->specMap = CSCI441::TextureUtils::loadAndRegisterTexture( "textures/metal-spec.dds" );
+    rubber = new TextureMaterial();
+    rubber->diffMap = CSCI441::TextureUtils::loadAndRegisterTexture( "textures/rubber-diff.png" );
+    rubber->specMap = CSCI441::TextureUtils::loadAndRegisterTexture( "textures/rubber-spec.dds" );
+    activeMat = metal;
 }
 
 void setupFonts() {
@@ -692,15 +706,16 @@ void renderScene( GLFWwindow *window ) {
     // Set light uniforms
 	glm::vec3 ambientFactor = glm::vec3(0.05, 0.05, 0.05);
 	glUniform3fv(modelShaderUniformLocs.ambient, 1, &ambientFactor[0]);
-    glm::vec3 lightDir = glm::vec3(vMtx * glm::normalize(glm::vec4(0.75f,0.75f,-0.5f,0)));
+    glm::vec3 lightDir = glm::normalize(glm::vec3(0.75f,0.75f,-0.5f));
     glUniform3fv(modelShaderUniformLocs.lightDir, 1, &lightDir[0]);
     glm::vec4 lightColor = glm::vec4(1,0.95,0.8,1);
     glUniform4fv(modelShaderUniformLocs.lightColor, 1, &lightColor[0]);
     glUniform1f(modelShaderUniformLocs.attenuation, 1.0f);
+    glUniform3fv(modelShaderUniformLocs.eyePos, 1, &eyePoint[0]);
     
-    mMtx = glm::rotate( mMtx, (GLfloat)time, glm::vec3( sin(time), cos(time), sin(time)-cos(time) ) );
+    mMtx = glm::mat4(1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1);//glm::rotate( mMtx, (GLfloat)time, glm::vec3( sin(time), cos(time), sin(time)-cos(time) ) );
 	// scale the cube up
-	mMtx = glm::scale( mMtx, glm::vec3(5, 5, 5));
+	mMtx = glm::scale( mMtx, glm::vec3(5,5,5));
 
 	// update our modelview matrix
 	mvMtx = vMtx * mMtx;
@@ -708,7 +723,7 @@ void renderScene( GLFWwindow *window ) {
 	mvpMtx = pMtx * mvMtx;
     
     glUniformMatrix4fv( modelShaderUniformLocs.mvpMtx, 1, GL_FALSE, &mvpMtx[0][0] );
-	glUniformMatrix4fv( modelShaderUniformLocs.mvMtx, 1, GL_FALSE, &mvMtx[0][0] );
+	glUniformMatrix4fv( modelShaderUniformLocs.mMtx, 1, GL_FALSE, &mMtx[0][0] );
     
     glEnable(GL_TEXTURE_2D);
     
@@ -728,9 +743,12 @@ void renderScene( GLFWwindow *window ) {
 	glBindTexture(GL_TEXTURE_CUBE_MAP, cubeMapTextureHandle);
     
 	// bind our Cube VAO
-	glBindVertexArray( vaods[CUBE] );
+	//glBindVertexArray( vaods[CUBE] );
 	// draw our cube!
-	glDrawArrays( GL_TRIANGLES, 0, sizeof( cubeVertices ) / sizeof( Vertex ) );
+	//glDrawArrays( GL_TRIANGLES, 0, sizeof( cubeVertices ) / sizeof( Vertex ) );
+    //cubeModel->draw(shaderAttribLocs.position, shaderAttribLocs.normal, shaderAttribLocs.texCoord);
+    CSCI441::setVertexAttributeLocations(shaderAttribLocs.position, shaderAttribLocs.normal, shaderAttribLocs.texCoord);
+    CSCI441::drawSolidSphere(0.5, 32, 32);
     glDisable(GL_TEXTURE_CUBE_MAP);
 }
 

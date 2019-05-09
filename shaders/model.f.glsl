@@ -1,21 +1,25 @@
-#version 330 core
+/*
+ *  CSCI 444, Advanced Computer Graphics, Spring 2019
+ *
+ *  Project: Final
+ *  File: model.f.glsl
+ *
+ *  Description:
+ *
+ *      Fragment shader for PBR with Fresnel and reflections
+ *
+ *  Author:
+ *      Tyler Blount
+ *
+ *  Notes:
+ *
+ */
 
-#define MAX_LIGHTS 8
-#define LT_DIRECTIONAL  0
-#define LT_POINT        1
-
-// struct for lights
-// lightVec is a direction for directional lights
-// or a position for point lights
-struct model_light {
-    vec4 lightVec;
-    vec4 lightColor;
-    int lightType;
-    float attenuation;
-};
+#version 410 core
 
 uniform mat4 modelViewProjMatrix;
-uniform mat4 modelViewMatrix;
+uniform mat4 modelMatrix;
+uniform vec3 eyePos;
 
 uniform vec3 ambientFactor;
 uniform vec3 lightDir;
@@ -24,9 +28,10 @@ uniform float attenuation;
 
 uniform sampler2D sDiffMap;
 uniform sampler2D sSpecMap;
+uniform samplerCube sCubeMap;
 
 in VertexOutput {
-    vec4 position;
+    vec3 position;
     vec3 normal;
     vec2 texCoord;
 } vertIn;
@@ -67,9 +72,11 @@ vec3 FresnelSchlick(vec3 specColor, vec3 light, vec3 halfVec)
 	return specColor + (vec3(1.0) - specColor) * pow(1.0 - clamp(dot(light, halfVec), 0.0, 1.0), 5.0);
 }
 
-vec3 SpecularBlinnPhong(vec3 specColor, vec3 light, vec3 normal, vec3 halfVec, float specPower, float fresnel, float dotNL)
+vec3 FresnelLazarovEnv(vec3 specColor, vec3 view, vec3 normal, float gloss)
 {
-	return mix(specColor, FresnelSchlick(specColor, light, halfVec), fresnel) * ((specPower + 2.0) / 8.0 ) * pow(clamp(dot(normal, halfVec), 0.0, 1.0), specPower) * dotNL;
+	// Fresnel for environment lighting 
+	// Equation referenced from Dimitar Lazarov's presentation titled Physically Based Rendering in Call of Duty: Black Ops
+	return specColor + (vec3(1.0) - specColor) * pow(1.0 - clamp(dot(view, normal), 0.0, 1.0), 5.0) / (4.0 - 3.0 * gloss);
 }
 
 vec3 SpecularGGX(vec3 specColor, vec3 light, vec3 normal, vec3 halfVec, vec3 view, float gloss, float fresnelFactor, float dotNL)
@@ -102,7 +109,7 @@ vec3 computeLighting(vec3 specColor, vec3 light, vec3 normal, vec3 halfVec, vec3
 
 vec3 CalculateLighting(vec3 normal, vec3 diffuseMaterial, vec3 specularMaterial, float gloss)
 {
-	vec3 eyeDir = vec3(normalize(-vertIn.position).xyz);
+	vec3 eyeDir = vec3(normalize(eyePos - vertIn.position).xyz);
 	vec3 lightAmbient = ambientFactor;
 	vec3 lightDiffuse = vec3(0.0, 0.0, 0.0);
 	vec3 lightSpecular = vec3(0.0, 0.0, 0.0);
@@ -110,7 +117,7 @@ vec3 CalculateLighting(vec3 normal, vec3 diffuseMaterial, vec3 specularMaterial,
     float NdotL = clamp(dot(normal, lightDir), 0.0, 1.0);
     // Ambient, Diffuse, and Specular
     lightDiffuse += lightColor.rgb * NdotL * attenuation;
-    lightSpecular += lightColor.rgb * computeLighting(specularMaterial, lightDir, normal, halfVec, eyeDir, gloss, 1.0, NdotL);
+    lightSpecular += lightColor.rgb * computeLighting(specularMaterial, lightDir, normal, halfVec, eyeDir, gloss, 1.0, NdotL) * attenuation;
 
 	return diffuseMaterial * (lightAmbient + lightDiffuse) + lightSpecular;
 }
@@ -119,9 +126,17 @@ out vec4 fragOut;
 
 void main() {
     
+    vec3 I = normalize(eyePos - vertIn.position).xyz;
+    vec3 N = normalize(vertIn.normal);
+    vec3 R = normalize(reflect(-I, N));
+    
     vec4 baseColor = vec4(1.0);
     vec4 diffColor = srgb_to_linear(texture(sDiffMap, vertIn.texCoord));
-    vec4 specColor = srgb_to_linear(texture(sSpecMap, vertIn.texCoord));
-    baseColor.rgb = CalculateLighting(normalize(vertIn.normal), diffColor.rgb, specColor.rgb, 0.6);
+    vec4 specColor = texture(sSpecMap, vertIn.texCoord);
+    specColor.rgb = srgb_to_linear(specColor.rgb);
+    baseColor.rgb = CalculateLighting(N, diffColor.rgb, specColor.rgb, specColor.a);
+    float mip = (1-specColor.a)*7.0;
+    vec4 envColor = textureLod(sCubeMap, R, mip);
+    baseColor.rgb += envColor.rgb * FresnelLazarovEnv(specColor.rgb, I, N, specColor.a);
     fragOut = linear_to_srgb(baseColor);
 }
